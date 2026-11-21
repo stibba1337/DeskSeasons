@@ -17,6 +17,20 @@ namespace DeskSeasons
         static void Main(string[] args)
         {
             if (args.Length == 2 && args[0] == "--export-icon") { Art.ExportIco(args[1]); return; }
+            if (args.Length == 2 && args[0] == "--sheet")
+            {
+                Art.Init(1f);
+                var w = new World(new Settings());
+                using (var bmp = new System.Drawing.Bitmap(1700, 1400))
+                using (var g = System.Drawing.Graphics.FromImage(bmp))
+                {
+                    g.Clear(System.Drawing.Color.FromArgb(255, 30, 36, 52));
+                    g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                    w.DrawSheet(g, 2f);
+                    bmp.Save(args[1]);
+                }
+                return;
+            }
             if (args.Length >= 3 && args[0] == "--render") { TestRender(int.Parse(args[1]), args[2], args.Length > 3 ? args[3] : ""); return; }
 
             bool created;
@@ -38,6 +52,7 @@ namespace DeskSeasons
                 AppDomain.CurrentDomain.UnhandledException += (s, e) => Log(e.ExceptionObject as Exception);
                 var app = new App();
                 if (Array.IndexOf(args, "--settings") >= 0) app.ShowSettings();
+                if (Array.IndexOf(args, "--settings-general") >= 0) app.ShowSettings(0);
                 Application.Run(app);
                 Native.timeEndPeriod(1);
             }
@@ -54,6 +69,7 @@ namespace DeskSeasons
             {
                 if (o == "noextra") s.Seasons[season].Extra = false;
                 if (o == "notree") s.Seasons[season].Tree = false;
+                if (o == "tree") s.Seasons[season].Tree = true;
                 if (o == "noground") s.Seasons[season].GroundPile = false;
                 if (o == "w1") s.Seasons[season].Weather = 1;
                 if (o == "w2") s.Seasons[season].Weather = 2;

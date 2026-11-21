@@ -35,7 +35,20 @@ namespace DeskSeasons
         public int SeasonMode;        // 0 авто, 1..4 = зима..осень
         public bool Visible = true;
         public int Fps = 30;
-        public int Monitors;          // 0 все, 1 основной
+        public bool AllMonitors = true;
+        public List<string> MonitorIds = new List<string>();   // имена устройств (\\.\DISPLAY1…), если не «все»
+
+        // Работает ли эффект на этом мониторе. Если выбранных нет среди подключённых — берём основной.
+        public bool UseMonitor(System.Windows.Forms.Screen sc)
+        {
+            if (AllMonitors) return true;
+            bool anyConnected = false;
+            foreach (var s in System.Windows.Forms.Screen.AllScreens)
+                if (MonitorIds.Contains(s.DeviceName)) anyConnected = true;
+            return anyConnected ? MonitorIds.Contains(sc.DeviceName) : sc.Primary;
+        }
+
+        public string MonitorKey { get { return AllMonitors ? "*" : string.Join("|", MonitorIds.ToArray()); } }
         public bool HideFromCapture = true;
         public bool HideOnFullscreen = true;
         public bool BrushOnHover = true;
@@ -125,7 +138,11 @@ namespace DeskSeasons
                 s.SeasonMode = I(d, "SeasonMode", s.SeasonMode, 0, 4);
                 s.Visible = B(d, "Visible", s.Visible);
                 s.Fps = I(d, "Fps", s.Fps, 10, 60);
-                s.Monitors = I(d, "Monitors", s.Monitors, 0, 1);
+                if (I(d, "Monitors", 0, 0, 1) == 1) s.AllMonitors = false;        // старый формат: «только основной»
+                s.AllMonitors = B(d, "AllMonitors", s.AllMonitors);
+                string ml;
+                if (d.TryGetValue("MonitorList", out ml))
+                    foreach (var p in ml.Split('|')) if (p.Trim().Length > 0) s.MonitorIds.Add(p.Trim());
                 s.HideFromCapture = B(d, "HideFromCapture", s.HideFromCapture);
                 s.HideOnFullscreen = B(d, "HideOnFullscreen", s.HideOnFullscreen);
                 s.BrushOnHover = B(d, "BrushOnHover", s.BrushOnHover);
@@ -178,7 +195,8 @@ namespace DeskSeasons
                 var sb = new StringBuilder();
                 sb.AppendLine("; Настройки DeskSeasons");
                 W(sb, "Version", 2);
-                W(sb, "SeasonMode", SeasonMode); W(sb, "Visible", Visible); W(sb, "Fps", Fps); W(sb, "Monitors", Monitors);
+                W(sb, "SeasonMode", SeasonMode); W(sb, "Visible", Visible); W(sb, "Fps", Fps); W(sb, "AllMonitors", AllMonitors);
+                sb.AppendLine("MonitorList=" + string.Join("|", MonitorIds.ToArray()));
                 W(sb, "HideFromCapture", HideFromCapture); W(sb, "HideOnFullscreen", HideOnFullscreen);
                 W(sb, "BrushOnHover", BrushOnHover); W(sb, "Modifier", Modifier); W(sb, "Autostart", Autostart);
                 W(sb, "ExcludeNoDecor", ExcludeNoDecor); W(sb, "ExcludeHideAll", ExcludeHideAll);

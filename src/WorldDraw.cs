@@ -427,7 +427,7 @@ namespace DeskSeasons
                 pts[i] = new PointF(cx + (float)Math.Cos(a) * rr, cy + (float)Math.Sin(a) * rr);
             }
             float glow = 0.6f + 0.4f * (float)Math.Sin(T * 3);
-            using (var br = new SolidBrush(Color.FromArgb((int)(70 * glow), 255, 230, 120))) g.FillEllipse(br, cx - r * 2, cy - r * 2, r * 4, r * 4);
+            Glow(g, cx, cy, r * 2.4f, Color.FromArgb(255, 255, 225, 110), (int)(150 * glow));
             using (var br = new SolidBrush(Color.FromArgb(255, 255, 215, 60))) g.FillPolygon(br, pts);
         }
 
@@ -443,32 +443,69 @@ namespace DeskSeasons
             }
         }
 
+        // Объёмная крона: тень снизу-справа → основной тон → блики сверху-слева, всё непрозрачное,
+        // плюс мелкие цветки (весна) или листья (осень) поверх. Ветви уходят в крону.
         void DrawBlossom(Graphics g, float x, float by, float k, bool spring)
         {
-            using (var pen = new Pen(Color.FromArgb(255, 105, 70, 50), 9 * k))
+            using (var pen = new Pen(Color.FromArgb(255, 105, 70, 50), 10 * k))
             {
                 pen.StartCap = LineCap.Round; pen.EndCap = LineCap.Round;
-                g.DrawLine(pen, x, by, x - 2 * k, by - 95 * k);
-                pen.Width = 5 * k;
-                g.DrawLine(pen, x - 2 * k, by - 80 * k, x - 42 * k, by - 120 * k);
-                g.DrawLine(pen, x - 2 * k, by - 88 * k, x + 40 * k, by - 128 * k);
-                g.DrawLine(pen, x - 2 * k, by - 95 * k, x + 4 * k, by - 150 * k);
+                g.DrawBezier(pen, x, by, x - 1 * k, by - 40 * k, x + 3 * k, by - 70 * k, x - 2 * k, by - 100 * k);
+                pen.Width = 5.5f * k;
+                g.DrawBezier(pen, x - 1 * k, by - 78 * k, x - 15 * k, by - 95 * k, x - 35 * k, by - 105 * k, x - 48 * k, by - 120 * k);
+                g.DrawBezier(pen, x, by - 86 * k, x + 15 * k, by - 100 * k, x + 32 * k, by - 112 * k, x + 45 * k, by - 128 * k);
+                pen.Width = 4 * k;
+                g.DrawLine(pen, x - 2 * k, by - 100 * k, x + 2 * k, by - 140 * k);
             }
-            Color[] cols = spring
-                ? new[] { Color.FromArgb(240, 255, 190, 210), Color.FromArgb(240, 250, 160, 190), Color.FromArgb(240, 255, 220, 232), Color.FromArgb(240, 245, 140, 175) }
-                : new[] { Color.FromArgb(240, 230, 100, 30), Color.FromArgb(240, 200, 60, 30), Color.FromArgb(240, 240, 170, 40), Color.FromArgb(240, 215, 130, 40) };
-            for (int i = 0; i < 26; i++)
+            Color shade = spring ? Color.FromArgb(255, 222, 120, 160) : Color.FromArgb(255, 170, 60, 25);
+            Color mid = spring ? Color.FromArgb(255, 248, 170, 200) : Color.FromArgb(255, 225, 105, 35);
+            Color hi = spring ? Color.FromArgb(255, 255, 214, 228) : Color.FromArgb(255, 245, 170, 55);
+            const int N = 17;
+            var cl = new RectangleF[N];
+            for (int i = 0; i < N; i++)
             {
-                float hx = Hash(i, 3) * 2 - 1, hy = Hash(i, 5);
-                float cx = x + hx * 62 * k, cy = by - (100 + hy * 75) * k;
-                float r = (14 + Hash(i, 9) * 14) * k;
-                float sway = (float)Math.Sin(T * 0.8 + i) * 1.2f * k;
-                using (var br = new SolidBrush(cols[i % cols.Length])) g.FillEllipse(br, cx - r + sway, cy - r, r * 2, r * 2);
+                double an = Hash(i, 3) * Math.PI * 2;
+                float d = (float)Math.Sqrt(Hash(i, 5));
+                float cx = x + (float)Math.Cos(an) * d * 58 * k, cy = by - 128 * k + (float)Math.Sin(an) * d * 34 * k;
+                float r = (19 + Hash(i, 9) * 9) * k;
+                float sway = (float)Math.Sin(T * 0.8 + i) * 1.0f * k;
+                cl[i] = new RectangleF(cx - r + sway, cy - r, r * 2, r * 2);
+            }
+            using (var b = new SolidBrush(shade)) foreach (var c in cl) g.FillEllipse(b, c.X + 3 * k, c.Y + 4 * k, c.Width, c.Height);
+            using (var b = new SolidBrush(mid)) foreach (var c in cl) g.FillEllipse(b, c);
+            using (var b = new SolidBrush(hi))
+                foreach (var c in cl) g.FillEllipse(b, c.X + c.Width * 0.18f, c.Y + c.Height * 0.12f, c.Width * 0.5f, c.Height * 0.45f);
+            for (int i = 0; i < 22; i++)
+            {
+                var c = cl[i % N];
+                float px = c.X + c.Width * (0.2f + Hash(i, 71) * 0.6f), py = c.Y + c.Height * (0.2f + Hash(i, 73) * 0.6f);
+                if (spring)
+                {
+                    var img = Art.FlowerOn[i % 2 == 0 ? 1 : 0];
+                    g.DrawImage(img, px - img.Width * 0.3f, py - img.Height * 0.3f, img.Width * 0.6f, img.Height * 0.6f);
+                }
+                else DrawLeaf(g, px, py, i * 53, 0.8f * k, i, 0, 0.8f);
             }
             if (!spring)
             {
                 DrawPumpkin(g, x - 48 * k, by, 20 * k);
                 DrawPumpkin(g, x + 40 * k, by, 15 * k);
+            }
+        }
+
+        // Мягкое свечение: радиальный градиент от цвета к прозрачному (вместо плоского полупрозрачного круга)
+        static void Glow(Graphics g, float cx, float cy, float r, Color c, int alpha)
+        {
+            if (alpha <= 0 || r <= 0) return;
+            using (var p = new GraphicsPath())
+            {
+                p.AddEllipse(cx - r, cy - r, r * 2, r * 2);
+                using (var br = new PathGradientBrush(p))
+                {
+                    br.CenterColor = Color.FromArgb(Math.Min(255, alpha), c);
+                    br.SurroundColors = new[] { Color.FromArgb(0, c) };
+                    g.FillPath(br, p);
+                }
             }
         }
 
@@ -625,44 +662,92 @@ namespace DeskSeasons
             g.Restore(st);
         }
 
+        // Йети: смотрит вправо, ступни в (0,0), рост ~100. Порядок: дальняя рука → ноги → туловище с мехом →
+        // лицо → ближняя рука поверх. У всего лёгкий голубой контур, чтобы Йети был виден и на белых окнах.
         void DrawYeti(Graphics g, Walker w)
         {
-            float a = w.State == 0 ? (float)Math.Sin(w.Anim * 4) : 0;
-            float bob = Math.Abs(a) * 2;
-            using (var fur = new SolidBrush(Color.FromArgb(255, 238, 243, 250)))
-            using (var shade = new SolidBrush(Color.FromArgb(255, 200, 212, 230)))
+            float a = w.State == 0 && !w.Wave ? (float)Math.Sin(w.Anim * 4) : 0;
+            float by = -Math.Abs(a) * 2.5f;                       // покачивание при ходьбе
+            Color furTop = Color.FromArgb(255, 250, 252, 255), furBot = Color.FromArgb(255, 214, 225, 242);
+            Color line = Color.FromArgb(255, 150, 170, 200);
+
+            // угол ближней руки (0 — висит вниз, минус — вперёд/вверх, плюс — назад)
+            float arm;
+            if (w.State == 2) arm = w.T < 0.55f ? 175 - w.T * 30 : -75;           // замах назад-вверх → бросок вперёд
+            else if (w.State == 3) arm = -45 + (float)Math.Sin(w.T * 9) * 25;      // лепит перед собой
+            else if (w.State == 4) arm = 60;                                       // отшатнулся
+            else if (w.Wave) arm = -155 + (float)Math.Sin(T * 11) * 22;            // машет
+            else arm = a * 22;
+            float backArm = w.State == 4 ? -50 : -a * 22;
+
+            using (var pen = new Pen(line, 1.6f))
+            using (var furB = new SolidBrush(furTop))
+            using (var shadeB = new SolidBrush(furBot))
+            using (var padB = new SolidBrush(Color.FromArgb(255, 120, 140, 175)))
             {
-                g.FillEllipse(shade, -14 + a * 7, -16, 13, 17);
-                g.FillEllipse(fur, 2 - a * 7, -16, 13, 17);
-                float by = -bob;
-                g.FillEllipse(fur, -24, -76 + by, 48, 66);
-                for (int i = 0; i < 12; i++)
+                // дальняя рука
+                Limb(g, -21, -50 + by, backArm, 12, 30, shadeB, pen, padB);
+                // ноги
+                for (int s = -1; s <= 1; s += 2)
                 {
-                    double an = i * Math.PI * 2 / 12;
-                    g.FillEllipse(fur, (float)Math.Cos(an) * 22 - 7, -43 + by + (float)Math.Sin(an) * 31 - 7, 14, 14);
+                    float lx = s * 9 + (s < 0 ? a : -a) * 6;
+                    g.FillEllipse(shadeB, lx - 8, -20, 16, 20); g.DrawEllipse(pen, lx - 8, -20, 16, 20);
+                    g.FillEllipse(padB, lx - 6, -5, 13, 5);
                 }
-                // руки
-                float arm = w.State == 2 ? (w.T < 0.55f ? -2.2f : 0.6f)
-                          : w.State == 3 ? (float)Math.Sin(w.T * 8) * 0.6f + 0.8f
-                          : w.State == 4 ? -1.4f
-                          : w.Wave ? -2.6f + (float)Math.Sin(T * 11) * 0.5f      // машет курсору
-                          : a * 0.5f;
-                var st = g.Save();
-                g.TranslateTransform(12, -55 + by); g.RotateTransform(arm * 50);
-                g.FillEllipse(shade, -6, -2, 13, 34);
-                g.Restore(st);
-                st = g.Save();
-                g.TranslateTransform(-14, -55 + by); g.RotateTransform(-a * 25);
-                g.FillEllipse(shade, -6, -2, 12, 32);
-                g.Restore(st);
-                using (var face = new SolidBrush(Color.FromArgb(255, 140, 170, 205))) g.FillEllipse(face, -2, -70 + by, 24, 22);
-                using (var b = new SolidBrush(Color.FromArgb(255, 25, 30, 45)))
+                // туловище: контур из «пушистых» кругов, затем заливка с градиентом
+                var tufts = new List<RectangleF>();
+                tufts.Add(new RectangleF(-27, -88 + by, 54, 76));
+                for (int i = 0; i < 14; i++)
                 {
-                    g.FillEllipse(b, 4, -64 + by, 4.5f, 5);
-                    g.FillEllipse(b, 13, -64 + by, 4.5f, 5);
+                    double an = -Math.PI / 2 + i * Math.PI * 2 / 14;
+                    float r = i % 2 == 0 ? 8.5f : 7f;
+                    float cx = (float)Math.Cos(an) * 25, cy = -50 + by + (float)Math.Sin(an) * 36;
+                    if (cy > -16) continue;                                         // снизу мех не торчит — там ноги
+                    tufts.Add(new RectangleF(cx - r, cy - r, r * 2, r * 2));
                 }
-                using (var pen = new Pen(Color.FromArgb(255, 40, 50, 70), 1.6f)) g.DrawArc(pen, 6, -59 + by, 10, 6, 10, 160);
-                if (w.State == 2 && w.T < 0.55f) Art.Ball(g, 20, -95 + by, 6);
+                using (var outline = new SolidBrush(line))
+                    foreach (var t in tufts) g.FillEllipse(outline, t.X - 1.4f, t.Y - 1.4f, t.Width + 2.8f, t.Height + 2.8f);
+                using (var grad = new LinearGradientBrush(new RectangleF(-36, -100 + by, 72, 92), furTop, furBot, LinearGradientMode.Vertical))
+                    foreach (var t in tufts) g.FillEllipse(grad, t);
+                // рожки
+                using (var horn = new SolidBrush(Color.FromArgb(255, 225, 205, 170)))
+                {
+                    g.FillPolygon(horn, new[] { new PointF(-12, -84 + by), new PointF(-4, -86 + by), new PointF(-14, -97 + by) });
+                    g.FillPolygon(horn, new[] { new PointF(6, -86 + by), new PointF(14, -84 + by), new PointF(10, -98 + by) });
+                }
+                // лицо — целиком на туловище, чуть смещено в сторону взгляда
+                float fx = 5, fy = -66 + by;
+                using (var face = new SolidBrush(Color.FromArgb(255, 160, 184, 218))) g.FillEllipse(face, fx - 13, fy - 11, 26, 23);
+                using (var dark = new SolidBrush(Color.FromArgb(255, 30, 38, 58)))
+                {
+                    bool hurt = w.State == 4;
+                    if (hurt)
+                        using (var p2 = new Pen(dark.Color, 1.6f))
+                        {   // глаза-крестики
+                            g.DrawLine(p2, fx - 7, fy - 6, fx - 3, fy - 2); g.DrawLine(p2, fx - 7, fy - 2, fx - 3, fy - 6);
+                            g.DrawLine(p2, fx + 3, fy - 6, fx + 7, fy - 2); g.DrawLine(p2, fx + 3, fy - 2, fx + 7, fy - 6);
+                        }
+                    else
+                    {
+                        g.FillEllipse(dark, fx - 7, fy - 6, 4.5f, 5.5f); g.FillEllipse(dark, fx + 3, fy - 6, 4.5f, 5.5f);
+                        g.FillEllipse(Brushes.White, fx - 6, fy - 5.5f, 1.6f, 1.6f); g.FillEllipse(Brushes.White, fx + 4, fy - 5.5f, 1.6f, 1.6f);
+                    }
+                    if (w.Anger > 0 && !hurt)
+                        using (var p2 = new Pen(dark.Color, 1.6f))
+                        { g.DrawLine(p2, fx - 8, fy - 9, fx - 3, fy - 7); g.DrawLine(p2, fx + 8, fy - 9, fx + 3, fy - 7); }
+                    g.FillEllipse(dark, fx - 2, fy + 0.5f, 4, 3);                   // нос
+                    if (hurt) g.FillEllipse(dark, fx - 2.5f, fy + 5, 5, 4.5f);     // «ой!»
+                    else
+                        using (var p2 = new Pen(dark.Color, 1.5f)) g.DrawArc(p2, fx - 5, fy + 1, 10, 7, 20, 140);
+                }
+                // ближняя рука поверх туловища
+                Limb(g, 22, -50 + by, arm, 13, 31, furB, pen, padB);
+                if (w.State == 2 && w.T < 0.55f)
+                {
+                    double ar = arm * Math.PI / 180;
+                    float tx = 22 - (float)Math.Sin(ar) * 31, ty = -50 + by + (float)Math.Cos(ar) * 31;
+                    Art.Ball(g, tx, ty, 6);
+                }
             }
             // получил снежком: над головой кружатся звёздочки
             if (w.State == 4)
@@ -670,10 +755,22 @@ namespace DeskSeasons
                     for (int i = 0; i < 3; i++)
                     {
                         double an = T * 7 + i * Math.PI * 2 / 3;
-                        float sx = (float)Math.Cos(an) * 18, sy = -90 + (float)Math.Sin(an) * 5;
+                        float sx = (float)Math.Cos(an) * 18, sy = -106 + (float)Math.Sin(an) * 5;
                         g.FillPolygon(br, new[] { new PointF(sx, sy - 4), new PointF(sx + 1.3f, sy - 1.3f), new PointF(sx + 4, sy), new PointF(sx + 1.3f, sy + 1.3f),
                                                   new PointF(sx, sy + 4), new PointF(sx - 1.3f, sy + 1.3f), new PointF(sx - 4, sy), new PointF(sx - 1.3f, sy - 1.3f) });
                     }
+        }
+
+        // Конечность-«капсула» от плеча (sx, sy), повёрнутая на deg градусов от направления вниз, с тёмной ладошкой
+        static void Limb(Graphics g, float sx, float sy, float deg, float wdt, float len, Brush fill, Pen pen, Brush pad)
+        {
+            var st = g.Save();
+            g.TranslateTransform(sx, sy);
+            g.RotateTransform(deg);
+            g.FillEllipse(fill, -wdt / 2, -wdt * 0.35f, wdt, len);
+            g.DrawEllipse(pen, -wdt / 2, -wdt * 0.35f, wdt, len);
+            g.FillEllipse(pad, -wdt / 2 + 2.5f, len - wdt * 0.35f - 6.5f, wdt - 5, 5);
+            g.Restore(st);
         }
 
         void DrawBunny(Graphics g, Walker w)
@@ -731,7 +828,7 @@ namespace DeskSeasons
                     using (var sp = new Pen(Color.FromArgb(255, 200, 110, 40), 2))
                         for (int i = 0; i < 3; i++) g.DrawLine(sp, -8 + i * 8, -26, -10 + i * 8, -18);
                 }
-                float hx = sit ? 4 : 14, hy = sit ? -48 : -38;
+                float hx = sit ? -11 : 14, hy = sit ? -47 : -38;   // сидя голова над туловищем
                 g.FillEllipse(fur, hx, hy, 19, 17);
                 g.FillPolygon(fur, new[] { new PointF(hx + 1, hy + 5), new PointF(hx + 3, hy - 6), new PointF(hx + 8, hy + 2) });
                 g.FillPolygon(fur, new[] { new PointF(hx + 11, hy + 2), new PointF(hx + 16, hy - 6), new PointF(hx + 18, hy + 5) });
@@ -791,45 +888,111 @@ namespace DeskSeasons
                         else DrawLeaf(g, px, py, i * 41, 0.8f, i, i % 3 == 0 ? 1 : 0, 0.6f);
                     }
             }
+            Color dark = Art.Blend(body, Color.Black, 0.3f);
+            using (var outline = new Pen(dark, 1.4f))
             using (var br = new SolidBrush(body))
             {
-                g.FillRectangle(br, -44, -36, 66, 20);
-                g.FillRectangle(br, -38, -62, 30, 27);
+                // задний навесной агрегат: травосборник (весна) или бункер с листьями (осень)
+                if (Sea == Season.Spring)
+                {
+                    using (var bag = new SolidBrush(Color.FromArgb(255, 205, 190, 150))) g.FillEllipse(bag, -64, -40, 24, 26);
+                    using (var p2 = new Pen(Color.FromArgb(255, 150, 135, 100), 1.2f)) { g.DrawEllipse(p2, -64, -40, 24, 26); g.DrawLine(p2, -58, -36, -58, -18); }
+                    using (var grass = new SolidBrush(Color.FromArgb(255, 110, 170, 70))) g.FillEllipse(grass, -62, -44, 18, 9);
+                }
+                else if (Sea == Season.Autumn)
+                {
+                    for (int i = 0; i < 6; i++) DrawLeaf(g, -60 + i * 3.5f, -44 - (i % 2) * 3, i * 61, 0.75f, i, 0, 0.8f);
+                    g.FillRectangle(br, -66, -42, 24, 22); g.DrawRectangle(outline, -66, -42, 24, 22);
+                    using (var p2 = new Pen(dark, 1f)) for (int i = 0; i < 3; i++) g.DrawLine(p2, -63 + i * 7, -38, -63 + i * 7, -24);
+                }
+                // крыло над задним колесом, капот, кабина
+                g.FillPie(br, -46, -40, 40, 40, 180, 180);
+                using (var p = Art.Rounded(-44, -38, 64, 22, 4)) { g.FillPath(br, p); g.DrawPath(outline, p); }
+                using (var grill = new Pen(dark, 1.2f)) for (int i = 0; i < 3; i++) g.DrawLine(grill, 16, -34 + i * 5, 19, -34 + i * 5);
+                using (var p = Art.Rounded(-41, -68, 32, 32, 4)) { g.FillPath(br, p); g.DrawPath(outline, p); }
             }
-            using (var br = new SolidBrush(Color.FromArgb(255, 170, 215, 245))) g.FillRectangle(br, -34, -58, 22, 15);
-            using (var br = new SolidBrush(Color.FromArgb(255, 60, 60, 65))) g.FillRectangle(br, 4, -46, 5, 12);
+            // стекло кабины, водитель в шапке
+            using (var glass = new LinearGradientBrush(new RectangleF(-37, -64, 24, 18), Color.FromArgb(255, 205, 235, 255), Color.FromArgb(255, 140, 190, 230), LinearGradientMode.Vertical))
+                g.FillRectangle(glass, -37, -64, 24, 18);
+            using (var drv = new SolidBrush(Color.FromArgb(255, 70, 80, 100))) { g.FillEllipse(drv, -28, -60, 10, 10); g.FillRectangle(drv, -31, -51, 16, 5); }
+            using (var hat = new SolidBrush(Sea == Season.Winter ? Color.FromArgb(255, 220, 50, 50) : Color.FromArgb(255, 60, 110, 200))) g.FillPie(hat, -29, -63, 12, 9, 180, 180);
+            using (var hl = new Pen(Color.FromArgb(150, 255, 255, 255), 1.5f)) g.DrawLine(hl, -35, -50, -27, -62);
+            // выхлопная труба и дымок
+            using (var pipe = new SolidBrush(Color.FromArgb(255, 70, 70, 75))) { g.FillRectangle(pipe, 4, -50, 4, 13); g.FillRectangle(pipe, 3, -51, 6, 2); }
+            for (int i = 0; i < 2; i++)
+            {
+                float sp = (c.Anim * 1.5f + i * 0.5f) % 1f;
+                using (var smoke = new SolidBrush(Color.FromArgb((int)(110 * (1 - sp)), 200, 200, 205)))
+                    g.FillEllipse(smoke, 4 - sp * 10, -56 - sp * 16, 6 + sp * 7, 6 + sp * 7);
+            }
+            // мигалка на крыше
             bool flash = ((int)(c.Anim * 4)) % 2 == 0;
-            using (var br = new SolidBrush(flash ? Color.FromArgb(255, 255, 140, 20) : Color.FromArgb(255, 170, 80, 20))) g.FillEllipse(br, -27, -70, 9, 8);
-            if (flash) using (var br = new SolidBrush(Color.FromArgb(70, 255, 160, 40))) g.FillEllipse(br, -36, -78, 27, 24);
+            using (var b = new SolidBrush(Color.FromArgb(255, 60, 60, 65))) g.FillRectangle(b, -29, -71, 10, 3);
+            if (flash) Glow(g, -24, -74, 15, Color.FromArgb(255, 255, 170, 40), 200);
+            using (var b = new SolidBrush(flash ? Color.FromArgb(255, 255, 190, 60) : Color.FromArgb(255, 200, 110, 30))) g.FillPie(b, -28, -78, 8, 10, 180, 180);
             DrawWheel(g, -26, -17, 17, c.Anim);
-            DrawWheel(g, 12, -11, 11, c.Anim);
+            DrawWheel(g, 10, -11, 11, c.Anim);
+            // передний агрегат
             if (Sea == Season.Winter)
-                using (var br = new SolidBrush(Color.FromArgb(255, 150, 155, 165)))
-                    g.FillPolygon(br, new[] { new PointF(26, -40), new PointF(34, -42), new PointF(38, 0), new PointF(26, 0) });
+            {
+                using (var arm = new Pen(Color.FromArgb(255, 80, 80, 85), 3)) { g.DrawLine(arm, 14, -24, 30, -20); g.DrawLine(arm, 14, -14, 30, -8); }
+                using (var blade = new GraphicsPath())
+                {
+                    blade.AddBezier(30, -38, 38, -30, 40, -14, 34, 0);
+                    blade.AddLine(34, 0, 43, 0);
+                    blade.AddBezier(43, 0, 47, -16, 44, -32, 36, -40);
+                    blade.CloseFigure();
+                    using (var bb = new LinearGradientBrush(new RectangleF(28, -40, 20, 41), Color.FromArgb(255, 215, 220, 228), Color.FromArgb(255, 130, 138, 150), LinearGradientMode.Horizontal))
+                        g.FillPath(bb, blade);
+                    using (var p2 = new Pen(Color.FromArgb(255, 90, 95, 105), 1.2f)) g.DrawPath(p2, blade);
+                }
+                using (var stripe = new SolidBrush(body)) g.FillRectangle(stripe, 30, -40, 7, 3);
+            }
             else if (Sea == Season.Spring)
-                using (var br = new SolidBrush(Color.FromArgb(255, 60, 120, 60))) g.FillRectangle(br, 20, -12, 18, 10);
+            {
+                using (var deck = new SolidBrush(Color.FromArgb(255, 45, 110, 50))) using (var p = Art.Rounded(18, -13, 26, 10, 3)) g.FillPath(deck, p);
+                using (var knife = new Pen(Color.FromArgb(255, 200, 205, 210), 1.6f))
+                {
+                    float s = (float)Math.Cos(c.Anim * 40) * 10;
+                    g.DrawLine(knife, 31 - s, -2, 31 + s, -2);
+                }
+            }
             else
             {
                 using (var br = new SolidBrush(Color.FromArgb(255, 120, 90, 60))) g.FillEllipse(br, 22, -22, 20, 20);
-                using (var pen = new Pen(Color.FromArgb(255, 200, 170, 110), 1.5f))
-                    for (int i = 0; i < 6; i++)
+                using (var pen = new Pen(Color.FromArgb(255, 210, 180, 120), 1.5f))
+                    for (int i = 0; i < 8; i++)
                     {
-                        double a = c.Anim * 12 + i * Math.PI / 3;
-                        g.DrawLine(pen, 32, -12, 32 + (float)Math.Cos(a) * 11, -12 + (float)Math.Sin(a) * 11);
+                        double a = c.Anim * 12 + i * Math.PI / 4;
+                        g.DrawLine(pen, 32, -12, 32 + (float)Math.Cos(a) * 12, -12 + (float)Math.Sin(a) * 12);
                     }
+                using (var hub = new SolidBrush(Color.FromArgb(255, 80, 60, 40))) g.FillEllipse(hub, 29, -15, 6, 6);
             }
             g.Restore(st);
         }
 
         static void DrawWheel(Graphics g, float x, float y, float r, float anim)
         {
-            using (var br = new SolidBrush(Color.FromArgb(255, 40, 40, 45))) g.FillEllipse(br, x - r, y - r, r * 2, r * 2);
-            using (var br = new SolidBrush(Color.FromArgb(255, 150, 150, 155))) g.FillEllipse(br, x - r * 0.45f, y - r * 0.45f, r * 0.9f, r * 0.9f);
-            using (var pen = new Pen(Color.FromArgb(255, 80, 80, 85), 1.5f))
+            double rot = anim * 150 / r;   // крутится со скоростью движения
+            using (var br = new SolidBrush(Color.FromArgb(255, 40, 40, 45)))
             {
-                double a = anim * 8;
-                g.DrawLine(pen, x, y, x + (float)Math.Cos(a) * r * 0.45f, y + (float)Math.Sin(a) * r * 0.45f);
+                // протектор: зубцы по ободу
+                for (int i = 0; i < 12; i++)
+                {
+                    double a = rot + i * Math.PI / 6;
+                    float tx = x + (float)Math.Cos(a) * r, ty = y + (float)Math.Sin(a) * r;
+                    g.FillEllipse(br, tx - r * 0.16f, ty - r * 0.16f, r * 0.32f, r * 0.32f);
+                }
+                g.FillEllipse(br, x - r, y - r, r * 2, r * 2);
             }
+            using (var br = new SolidBrush(Color.FromArgb(255, 70, 70, 75))) g.FillEllipse(br, x - r * 0.62f, y - r * 0.62f, r * 1.24f, r * 1.24f);
+            using (var br = new SolidBrush(Color.FromArgb(255, 175, 175, 180))) g.FillEllipse(br, x - r * 0.45f, y - r * 0.45f, r * 0.9f, r * 0.9f);
+            using (var br = new SolidBrush(Color.FromArgb(255, 110, 110, 115)))
+                for (int i = 0; i < 4; i++)
+                {
+                    double a = rot + i * Math.PI / 2;
+                    g.FillEllipse(br, x + (float)Math.Cos(a) * r * 0.25f - r * 0.07f, y + (float)Math.Sin(a) * r * 0.25f - r * 0.07f, r * 0.14f, r * 0.14f);
+                }
         }
 
         // ---------------- мелочи ----------------

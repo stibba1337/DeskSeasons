@@ -53,6 +53,8 @@ namespace DeskSeasons
             base.OnFormClosing(e);
         }
 
+        public void SelectTab(int i) { if (i >= 0 && i < tabs.TabCount) tabs.SelectedIndex = i; }
+
         public void RefreshFromSettings()
         {
             loading = true;
@@ -130,7 +132,7 @@ namespace DeskSeasons
             Check(t, "Показывать эффекты (снять — программа «спит»)", () => S.Visible, v => S.Visible = v);
 
             Header(t, "Экран");
-            Combo(t, "Мониторы", new[] { "Все мониторы", "Только основной" }, () => S.Monitors, v => S.Monitors = v);
+            MonitorPicker(t);
             Combo(t, "Плавность (кадров в секунду)", new[] { "20 — экономно", "30 — обычно", "45", "60 — максимально плавно" },
                 () => S.Fps <= 20 ? 0 : S.Fps <= 30 ? 1 : S.Fps <= 45 ? 2 : 3, v => S.Fps = new[] { 20, 30, 45, 60 }[v]);
             Check(t, "Не показывать эффекты при демонстрации экрана и на скриншотах", () => S.HideFromCapture, v => S.HideFromCapture = v);
@@ -155,7 +157,7 @@ namespace DeskSeasons
             {
                 if (MessageBox.Show(this, "Вернуть все настройки по умолчанию?", "DeskSeasons", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return;
                 var d = new Settings();
-                S.SeasonMode = d.SeasonMode; S.Fps = d.Fps; S.Monitors = d.Monitors; S.HideFromCapture = d.HideFromCapture;
+                S.SeasonMode = d.SeasonMode; S.Fps = d.Fps; S.AllMonitors = true; S.MonitorIds.Clear(); S.HideFromCapture = d.HideFromCapture;
                 S.HideOnFullscreen = d.HideOnFullscreen; S.BrushOnHover = d.BrushOnHover; S.Modifier = d.Modifier;
                 S.ExcludeNoDecor = d.ExcludeNoDecor; S.ExcludeHideAll = d.ExcludeHideAll; S.Visible = true;
                 for (int i = 0; i < 4; i++) S.Seasons[i] = d.Seasons[i];
@@ -164,6 +166,84 @@ namespace DeskSeasons
             t.Controls.Add(reset); t.SetColumnSpan(reset, 3);
             page.Controls.Add(t);
             return page;
+        }
+
+        // Выбор мониторов: «Все мониторы» или галочки у конкретных; кнопка показывает номера на экранах
+        void MonitorPicker(TableLayoutPanel t)
+        {
+            var all = Check(t, "Эффекты на всех мониторах", () => S.AllMonitors, v =>
+            {
+                S.AllMonitors = v;
+                // при снятии «всех» по умолчанию отмечаем все подключённые — дальше пользователь снимет лишние
+                if (!v && S.MonitorIds.Count == 0) foreach (var sc in Screen.AllScreens) S.MonitorIds.Add(sc.DeviceName);
+            });
+            var list = new CheckedListBox { CheckOnClick = true, Height = 90, Dock = DockStyle.Fill, IntegralHeight = false, Margin = new Padding(18, 2, 0, 2) };
+            var screens = Screen.AllScreens.OrderBy(s => MonitorNumber(s)).ToArray();
+            foreach (var sc in screens) list.Items.Add(MonitorTitle(sc));
+            list.ItemCheck += delegate (object o, ItemCheckEventArgs e)
+            {
+                if (loading) return;
+                string id = screens[e.Index].DeviceName;
+                if (e.NewValue == CheckState.Checked) { if (!S.MonitorIds.Contains(id)) S.MonitorIds.Add(id); }
+                else
+                {
+                    int left = 0;
+                    for (int i = 0; i < screens.Length; i++) if (i != e.Index && list.GetItemChecked(i)) left++;
+                    if (left == 0) { e.NewValue = CheckState.Checked; return; }   // хотя бы один монитор остаётся
+                    S.MonitorIds.Remove(id);
+                }
+                BeginInvoke(new Action(Changed));
+            };
+            refreshers.Add(delegate
+            {
+                list.Enabled = !S.AllMonitors;
+                for (int i = 0; i < screens.Length; i++)
+                    list.SetItemChecked(i, S.AllMonitors || S.UseMonitor(screens[i]));
+            });
+            all.CheckedChanged += delegate { if (!loading) RefreshFromSettings(); };
+            t.Controls.Add(list); t.SetColumnSpan(list, 3);
+
+            var identify = new Button { Text = "Показать номера мониторов", AutoSize = true, Margin = new Padding(18, 2, 0, 6) };
+            identify.Click += delegate { IdentifyMonitors(); };
+            t.Controls.Add(identify); t.SetColumnSpan(identify, 3);
+        }
+
+        static int MonitorNumber(Screen sc)
+        {
+            var digits = new string(sc.DeviceName.Where(char.IsDigit).ToArray());
+            int n; return int.TryParse(digits, out n) ? n : 0;
+        }
+
+        static string MonitorTitle(Screen sc)
+        {
+            return "Монитор " + MonitorNumber(sc) + " — " + sc.Bounds.Width + "×" + sc.Bounds.Height + (sc.Primary ? " (основной)" : "");
+        }
+
+        // На 3 секунды выводит крупный номер в центре каждого монитора
+        static void IdentifyMonitors()
+        {
+            foreach (var sc in Screen.AllScreens)
+            {
+                var f = new Form
+                {
+                    FormBorderStyle = FormBorderStyle.None, ShowInTaskbar = false, TopMost = true,
+                    StartPosition = FormStartPosition.Manual, BackColor = Color.FromArgb(30, 40, 60), Opacity = 0.9
+                };
+                var size = new Size(260, 200);
+                f.Bounds = new Rectangle(sc.Bounds.X + (sc.Bounds.Width - size.Width) / 2, sc.Bounds.Y + (sc.Bounds.Height - size.Height) / 2, size.Width, size.Height);
+                var l = new Label
+                {
+                    Dock = DockStyle.Fill, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.White,
+                    Font = new Font("Segoe UI", 64, FontStyle.Bold), Text = MonitorNumber(sc).ToString()
+                };
+                f.Controls.Add(l);
+                var sub = new Label { Dock = DockStyle.Bottom, Height = 30, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.Silver,
+                                      Text = sc.Bounds.Width + "×" + sc.Bounds.Height + (sc.Primary ? ", основной" : "") };
+                f.Controls.Add(sub);
+                var tm = new Timer { Interval = 3000 };
+                tm.Tick += delegate { tm.Dispose(); f.Close(); };
+                f.Show(); tm.Start();
+            }
         }
 
         TabPage SeasonTab(int si)

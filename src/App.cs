@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using Microsoft.Win32;
@@ -36,7 +37,7 @@ namespace DeskSeasons
         SettingsForm settingsForm;
         Icon trayIcon;
         Season iconSeason = (Season)(-1);
-        int monitorsMode = -1;
+        string monitorsKey;
 
         public App()
         {
@@ -78,7 +79,7 @@ namespace DeskSeasons
             var list = new List<Mon>();
             foreach (var sc in Screen.AllScreens)
             {
-                if (S.Monitors == 1 && !sc.Primary) continue;
+                if (!S.UseMonitor(sc)) continue;
                 var m = new Mon { B = sc.Bounds, W = sc.WorkingArea, Primary = sc.Primary };
                 m.O = new Overlay(sc.Bounds);
                 m.O.SetExcludeFromCapture(S.HideFromCapture);
@@ -87,7 +88,7 @@ namespace DeskSeasons
                 list.Add(m);
             }
             W.SetMonitors(list);
-            monitorsMode = S.Monitors;
+            monitorsKey = S.MonitorKey;
         }
 
         void OnDisplayChanged(object sender, EventArgs e)
@@ -243,7 +244,7 @@ namespace DeskSeasons
 
         public void ApplyAll()
         {
-            if (S.Monitors != monitorsMode) BuildMonitors();
+            if (S.MonitorKey != monitorsKey) BuildMonitors();
             var cs = S.CurrentSeason();
             if (cs != W.Sea) W.SetSeason(cs);
             W.SS = S.Seasons[(int)W.Sea];
@@ -358,6 +359,28 @@ namespace DeskSeasons
                 wind.DropDownItems.Add(Check(wn[i], Math.Abs(ss.Wind - v) < 15, delegate { ss.Wind = v; Changed(); }));
             }
             menu.Items.Add(wind);
+
+            var screens = Screen.AllScreens;
+            if (screens.Length > 1)
+            {
+                var mons = new ToolStripMenuItem("Мониторы");
+                mons.DropDownItems.Add(Check("Все мониторы", S.AllMonitors, delegate { S.AllMonitors = true; Changed(); }));
+                mons.DropDownItems.Add(new ToolStripSeparator());
+                foreach (var sc in screens.OrderBy(x => x.DeviceName))
+                {
+                    var scr = sc;
+                    string title = "Монитор " + new string(sc.DeviceName.Where(char.IsDigit).ToArray()) + " — " + sc.Bounds.Width + "×" + sc.Bounds.Height + (sc.Primary ? " (основной)" : "");
+                    mons.DropDownItems.Add(Check(title, !S.AllMonitors && S.UseMonitor(sc), delegate
+                    {
+                        // выбор из меню: переключаем один монитор, «все» снимается
+                        if (S.AllMonitors) { S.AllMonitors = false; S.MonitorIds.Clear(); S.MonitorIds.Add(scr.DeviceName); }
+                        else if (S.MonitorIds.Contains(scr.DeviceName)) { if (S.MonitorIds.Count > 1) S.MonitorIds.Remove(scr.DeviceName); }
+                        else S.MonitorIds.Add(scr.DeviceName);
+                        Changed();
+                    }));
+                }
+                menu.Items.Add(mons);
+            }
             menu.Items.Add(new ToolStripSeparator());
 
             if (si != 2) menu.Items.Add(Check(Settings.PileNames[si], ss.WindowPiles, delegate { ss.WindowPiles = !ss.WindowPiles; Changed(); }));
@@ -395,12 +418,15 @@ namespace DeskSeasons
             return it;
         }
 
-        public void ShowSettings()
+        public void ShowSettings() { ShowSettings(-1); }
+
+        public void ShowSettings(int tab)
         {
             if (settingsForm == null || settingsForm.IsDisposed)
             {
                 settingsForm = new SettingsForm(this);
             }
+            if (tab >= 0) settingsForm.SelectTab(tab);
             settingsForm.Show();
             settingsForm.WindowState = FormWindowState.Normal;
             settingsForm.Activate();

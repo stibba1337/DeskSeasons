@@ -487,7 +487,7 @@ namespace DeskSeasons
                 if (w.T < 0.5f && Math.Abs(aimX - w.X) > 5) w.Dir = aimX > w.X ? 1 : -1;
                 if (w.Throws == 0 && w.T > 0.55f)
                 {
-                    float x0 = w.X + w.Dir * 14 * K, y0 = SurfaceGround(m, w.X) - 95 * K;
+                    float x0 = w.X + w.Dir * 40 * K, y0 = SurfaceGround(m, w.X) - 62 * K;   // из руки после замаха
                     if (w.AimCursor)
                         Throw(x0, y0, CursorX, CursorY, 0.8f, 1, true, null);
                     else if (hasTarget)
