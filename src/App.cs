@@ -96,11 +96,31 @@ namespace DeskSeasons
         }
 
         // ---------------- главный цикл ----------------
+        // Системный таймер срабатывает с шагом ~15,6 мс, поэтому «интервал 33 мс» превращался в 47 мс (21 кадр/с).
+        // Теперь таймер тикает часто, а кадр рисуется по расписанию — средняя частота точно равна настройке.
+        // Если кадр не успевает (тяжело компьютеру), период сам растёт до трёх раз, а при запасе — возвращается.
+        double nextDue, workEma, slow = 1;
+
         void Tick(object sender, EventArgs e)
         {
             double now = clock.Elapsed.TotalSeconds;
+            double period = slow / Math.Max(10, S.Fps);
+            if (now < nextDue - 0.002) return;
+            nextDue = Math.Max(nextDue + period, now - period);   // без «догонялок» после паузы
+
             float dt = (float)Math.Min(0.05, Math.Max(0.001, now - last));
             last = now;
+            FrameWork(dt);
+
+            double work = clock.Elapsed.TotalSeconds - now;
+            workEma = workEma * 0.9 + work * 0.1;
+            double budget = 1.0 / Math.Max(10, S.Fps);
+            if (workEma > budget * 0.6 && slow < 3) slow = Math.Min(3, slow * 1.1);
+            else if (workEma < budget * 0.3 && slow > 1) slow = Math.Max(1, slow / 1.05);
+        }
+
+        void FrameWork(float dt)
+        {
 
             seasonTimer += dt;
             if (seasonTimer > 30) { seasonTimer = 0; var cs = S.CurrentSeason(); if (cs != W.Sea) { W.SetSeason(cs); W.SS = S.Seasons[(int)cs]; UpdateIcon(); UpdateHook(); } }
@@ -117,20 +137,54 @@ namespace DeskSeasons
                 }
             }
 
+            long t0 = clock.ElapsedTicks;
             var wins = WindowTracker.Enumerate(own, S);
+            long t1 = clock.ElapsedTicks;
             Native.POINT cp; Native.GetCursorPos(out cp);
             W.Update(dt, wins, new Point(cp.X, cp.Y), ModifierDown());
+            long t2 = clock.ElapsedTicks;
 
+            long tClear = 0, tDraw = 0, tPresent = 0;
             foreach (var m in W.Mons)
             {
                 if (m.Hidden) continue;
+                long a = clock.ElapsedTicks;
                 m.O.BeginFrame();
+                long b = clock.ElapsedTicks;
                 try { W.Render(m, m.O.G); } catch (Exception ex) { Program.Log(ex); }
+                long c = clock.ElapsedTicks;
                 m.O.Present();
+                long d = clock.ElapsedTicks;
+                tClear += b - a; tDraw += c - b; tPresent += d - c;
             }
+            if (Program.Profile) Prof(t1 - t0, t2 - t1, tClear, tDraw, tPresent);
 
             topTimer += dt;
             if (topTimer > 2) { topTimer = 0; foreach (var m in W.Mons) if (!m.Hidden) m.O.KeepOnTop(); }
+        }
+
+        // Замер времени кадра по частям: переменная окружения DESKSEASONS_PROFILE=1, итог раз в 5 с в %TEMP%\DeskSeasons\profile.log
+        readonly double[] profSum = new double[5];
+        int profN; double profStart;
+        void Prof(params long[] ticks)
+        {
+            for (int i = 0; i < 5; i++) profSum[i] += ticks[i] * 1000.0 / Stopwatch.Frequency;
+            profN++;
+            double now = clock.Elapsed.TotalSeconds;
+            if (now - profStart < 5) return;
+            string line = string.Format("{0:HH:mm:ss} fps={1:F1} windows={2:F2} update={3:F2} clear={4:F2} draw={5:F2} present={6:F2} ms particles={7}",
+                DateTime.Now, profN / (now - profStart), profSum[0] / profN, profSum[1] / profN, profSum[2] / profN, profSum[3] / profN, profSum[4] / profN, W.P.Count);
+            line += " | decor/piles/garland/ground+chars/particles/rest =";
+            for (int i = 0; i < World.Prof.Length; i++) { line += " " + (World.Prof[i] * 1000.0 / Stopwatch.Frequency / profN).ToString("F2"); World.Prof[i] = 0; }
+            line += " | windows=" + W.Z.Count + " slow=x" + slow.ToString("F2");
+            try
+            {
+                string dir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "DeskSeasons");
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "profile.log"), line + Environment.NewLine);
+            }
+            catch { }
+            Array.Clear(profSum, 0, 5); profN = 0; profStart = now;
         }
 
         bool ModifierDown()
@@ -194,7 +248,7 @@ namespace DeskSeasons
             if (cs != W.Sea) W.SetSeason(cs);
             W.SS = S.Seasons[(int)W.Sea];
             foreach (var m in W.Mons) m.O.SetExcludeFromCapture(S.HideFromCapture);
-            timer.Interval = Math.Max(10, 1000 / Math.Max(10, S.Fps));
+            timer.Interval = 1;   // фактический шаг ~15 мс; частоту кадров держит расписание в Tick
             if (S.Visible)
             {
                 foreach (var m in W.Mons) if (!m.Hidden) m.O.Show();

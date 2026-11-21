@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Diagnostics;
 
 namespace DeskSeasons
 {
@@ -30,8 +31,11 @@ namespace DeskSeasons
             rainPen.Width = 1.2f * K;
             var area = m.B;
 
+            long s0 = Stopwatch.GetTimestamp();
             if (Sea == Season.Autumn && SS.Extra) DrawFog(g, m);
             if (SS.Tree && m.Primary) DrawTree(g);
+            long s1 = Stopwatch.GetTimestamp();
+            long sPile = 0, sGar = 0;
 
             // окна
             for (int i = Z.Count - 1; i >= 0; i--)
@@ -39,13 +43,17 @@ namespace DeskSeasons
                 var p = Z[i];
                 if (!p.Decor || p.Segs.Count == 0) continue;
                 if (p.R.Right < area.Left || p.R.Left > area.Right || p.R.Top < area.Top - 60 || p.R.Top > area.Bottom + 60) continue;
+                long q0 = Stopwatch.GetTimestamp();
                 if (SnowSeason) DrawSnowPile(g, p.Hh, p.R.Left, p.R.Top, p);
                 else DrawItems(g, p.Items, p.R.Left, p.R.Top, p, p.Layer, p.R.Width);
                 if (SnowSeason && SS.Extra2) DrawIcicles(g, p);
+                long q1 = Stopwatch.GetTimestamp();
                 if (SS.Garland && SS.GarlandPlace != 1) DrawGarland(g, p.R.Left, p.R.Right, p.R.Top, p);
+                sPile += q1 - q0; sGar += Stopwatch.GetTimestamp() - q1;
             }
             if (SS.Garland && SS.GarlandPlace != 0) DrawGarland(g, m.B.Left, m.B.Right, m.B.Top - 2 * K, null);
 
+            long s2 = Stopwatch.GetTimestamp();
             // низ экрана
             if (SnowSeason) DrawSnowPile(g, m.Gh, m.W.Left, m.W.Bottom, null);
             else DrawItems(g, m.Items, m.W.Left, m.W.Bottom, null, m.Layer, m.W.Width);
@@ -55,7 +63,9 @@ namespace DeskSeasons
             if (Walker != null && Walker.M == m) DrawWalker(g, Walker);
             if (Cleaner != null && Cleaner.M == m) DrawCleaner(g, Cleaner);
 
+            long s3 = Stopwatch.GetTimestamp();
             DrawParticles(g, area);
+            long s4 = Stopwatch.GetTimestamp();
 
             foreach (var f in Flies) if (area.Contains((int)f.X, (int)f.Y)) DrawButterfly(g, f);
             foreach (var b in Balls) if (area.Contains((int)b.X, (int)b.Y)) Art.Ball(g, b.X, b.Y, b.R);
@@ -63,7 +73,10 @@ namespace DeskSeasons
             foreach (var s in Splats) if (area.Contains((int)s.X, (int)s.Y)) DrawSplat(g, s);
             if (Modifier && AccumSeason && area.Contains((int)CursorX, (int)CursorY)) DrawMitten(g);
             if (Bolt != null && Bolt.M == m) DrawBolt(g, Bolt);
+            long s5 = Stopwatch.GetTimestamp();
+            Prof[0] += s1 - s0; Prof[1] += sPile; Prof[2] += sGar; Prof[3] += s3 - s2; Prof[4] += s4 - s3; Prof[5] += s5 - s4;
         }
+        public static readonly long[] Prof = new long[6]; // декор, накопленное на окнах, гирлянды, низ+персонажи, частицы, прочее
 
         // ---------------- частицы ----------------
         void DrawParticles(Graphics g, Rectangle a)
@@ -79,14 +92,14 @@ namespace DeskSeasons
                             int idx = (int)Math.Round((q.Size / K - 1.2f) / 0.75f);
                             if (idx < 0) idx = 0; if (idx > 7) idx = 7;
                             var img = Art.Flakes[idx];
-                            g.DrawImage(img, q.X - img.Width / 2f, q.Y - img.Height / 2f, img.Width, img.Height);
+                            Blit(g, img, q.X - img.Width / 2f, q.Y - img.Height / 2f);
                             if (q.Shape == 1)
                             {
                                 // ком неровный: к основному пятну прилеплены два поменьше
                                 var sm = Art.Flakes[Math.Max(0, idx - 3)];
                                 float o = q.Size * 0.7f;
-                                g.DrawImage(sm, q.X + o - sm.Width / 2f, q.Y - o * 0.4f - sm.Height / 2f, sm.Width, sm.Height);
-                                g.DrawImage(sm, q.X - o * 0.8f - sm.Width / 2f, q.Y + o * 0.3f - sm.Height / 2f, sm.Width, sm.Height);
+                                Blit(g, sm, q.X + o - sm.Width / 2f, q.Y - o * 0.4f - sm.Height / 2f);
+                                Blit(g, sm, q.X - o * 0.8f - sm.Width / 2f, q.Y + o * 0.3f - sm.Height / 2f);
                             }
                             break;
                         }
@@ -109,16 +122,27 @@ namespace DeskSeasons
             }
         }
 
+        // Готовая картинка копируется по целым пикселям без масштаба — у GDI+ это быстрый путь.
+        // По дробным координатам он пересчитывает каждую точку с интерполяцией, а это в разы медленнее.
+        static void Blit(Graphics g, Image img, float x, float y)
+        {
+            var im = g.InterpolationMode; var pm = g.PixelOffsetMode;
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.PixelOffsetMode = PixelOffsetMode.None;
+            g.DrawImage(img, new Rectangle((int)Math.Round(x), (int)Math.Round(y), img.Width, img.Height));
+            g.InterpolationMode = im; g.PixelOffsetMode = pm;
+        }
+
         static void DrawLeaf(Graphics g, float x, float y, float rot, float s, int color, int shape, float flip)
         {
             var img = Art.LeafSprite(false, shape, color % Art.LeafColors.Length, rot, flip, s);
-            g.DrawImage(img, x - img.Width / 2f, y - img.Height / 2f, img.Width, img.Height);
+            Blit(g, img, x - img.Width / 2f, y - img.Height / 2f);
         }
 
         static void DrawPetal(Graphics g, float x, float y, float rot, float s, int color, float flip)
         {
             var img = Art.LeafSprite(true, 0, color % Art.PetalColors.Length, rot, flip, s);
-            g.DrawImage(img, x - img.Width / 2f, y - img.Height / 2f, img.Width, img.Height);
+            Blit(g, img, x - img.Width / 2f, y - img.Height / 2f);
         }
 
         void DrawFluff(Graphics g, float x, float y, float rot, float s)
@@ -209,14 +233,15 @@ namespace DeskSeasons
                 }
             }
             float ox = left - pad, oy = top - maxH;
-            if (p == null) { g.DrawImage(layer.Bmp, ox, oy, w, h); return; }
+            if (p == null) { Blit(g, layer.Bmp, ox, oy); return; }
             for (int s = 0; s < p.Segs.Count; s += 2)
             {
                 float x0 = p.Segs[s], x1 = p.Segs[s + 1];
                 if (s == 0 && x0 <= p.R.Left) x0 = ox;                         // крайние участки — с запасом,
                 if (s == p.Segs.Count - 2 && x1 >= p.R.Right) x1 = ox + w;      // чтобы листья на углах не обрезались
                 var src = new RectangleF(x0 - ox, 0, x1 - x0, h);
-                g.DrawImage(layer.Bmp, new RectangleF(x0, oy, x1 - x0, h), src, GraphicsUnit.Pixel);
+                g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.None;
+                g.DrawImage(layer.Bmp, new Rectangle((int)Math.Round(x0), (int)Math.Round(oy), (int)Math.Round(x1 - x0), h), new Rectangle((int)Math.Round(src.X), 0, (int)Math.Round(x1 - x0), h), GraphicsUnit.Pixel);
             }
         }
 
@@ -301,7 +326,7 @@ namespace DeskSeasons
                 case Season.Winter:
                     {
                         var img = BulbOn(idx) ? Art.BulbOn[idx % 5] : Art.BulbOff[idx % 5];
-                        g.DrawImage(img, x - img.Width / 2f, y - 4 * K, img.Width, img.Height);
+                        Blit(g, img, x - img.Width / 2f, y - 4 * K);
                         break;
                     }
                 case Season.Spring:
@@ -315,7 +340,7 @@ namespace DeskSeasons
                             break;
                         }
                         var img = BulbOn(idx) ? Art.FlowerOn[(idx / 2) % 5] : Art.FlowerOff[(idx / 2) % 5];
-                        g.DrawImage(img, x - img.Width / 2f, y - img.Height / 2f + 2 * K, img.Width, img.Height);
+                        Blit(g, img, x - img.Width / 2f, y - img.Height / 2f + 2 * K);
                         break;
                     }
                 case Season.Summer:
@@ -333,7 +358,7 @@ namespace DeskSeasons
                             break;
                         }
                         var img = BulbOn(idx) ? Art.AutumnOn[idx % 5] : Art.AutumnOff[idx % 5];
-                        g.DrawImage(img, x - img.Width / 2f, y - 4 * K, img.Width, img.Height);
+                        Blit(g, img, x - img.Width / 2f, y - 4 * K);
                         break;
                     }
             }

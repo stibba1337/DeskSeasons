@@ -82,6 +82,7 @@ namespace DeskSeasons
             G.SmoothingMode = SmoothingMode.AntiAlias;
             G.InterpolationMode = InterpolationMode.Bilinear;
             G.PixelOffsetMode = PixelOffsetMode.Half;
+            G.CompositingQuality = CompositingQuality.HighSpeed;
             G.TranslateTransform(-Area.X, -Area.Y);
         }
 

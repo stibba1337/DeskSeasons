@@ -93,6 +93,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 Готовый файл появится в `dist\DeskSeasons.exe`.
 
+Чтобы посмотреть, сколько времени уходит на каждую часть кадра, задайте переменную окружения `DESKSEASONS_PROFILE=1` и запустите программу. Раз в 5 секунд итог пишется в `%TEMP%\DeskSeasons\profile.log`.
+
 ### Устройство проекта
 
 | Файл | Что внутри |

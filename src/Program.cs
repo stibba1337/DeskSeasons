@@ -12,6 +12,7 @@ namespace DeskSeasons
 {
     static class Program
     {
+        public static readonly bool Profile = Environment.GetEnvironmentVariable("DESKSEASONS_PROFILE") == "1";
         [STAThread]
         static void Main(string[] args)
         {
