@@ -27,6 +27,7 @@ namespace DeskSeasons
         public bool Cleaner = true;
         public bool Extra = true;
         public bool Extra2 = true;
+        public bool Fights = true;    // зима: Йети и снеговики кидаются снежками
     }
 
     public class Settings
@@ -157,6 +158,7 @@ namespace DeskSeasons
                     ss.Cleaner = B(d, k + "Cleaner", ss.Cleaner);
                     ss.Extra = B(d, k + "Extra", ss.Extra);
                     ss.Extra2 = B(d, k + "Extra2", ss.Extra2);
+                    ss.Fights = B(d, k + "Fights", ss.Fights);
                 }
                 // Файлы первой версии: туман и деревья тогда были включены по умолчанию — выключаем один раз
                 if (I(d, "Version", 1, 1, 100) < 2)
@@ -189,7 +191,7 @@ namespace DeskSeasons
                     W(sb, k + "PileMax", ss.PileMax); W(sb, k + "GroundPile", ss.GroundPile); W(sb, k + "Garland", ss.Garland);
                     W(sb, k + "GarlandPlace", ss.GarlandPlace); W(sb, k + "Tree", ss.Tree); W(sb, k + "TreeSide", ss.TreeSide);
                     W(sb, k + "Character", ss.Character); W(sb, k + "CharacterFreq", ss.CharacterFreq);
-                    W(sb, k + "Cleaner", ss.Cleaner); W(sb, k + "Extra", ss.Extra); W(sb, k + "Extra2", ss.Extra2);
+                    W(sb, k + "Cleaner", ss.Cleaner); W(sb, k + "Extra", ss.Extra); W(sb, k + "Extra2", ss.Extra2); W(sb, k + "Fights", ss.Fights);
                 }
                 string path = FilePath;
                 Directory.CreateDirectory(Path.GetDirectoryName(path));

@@ -201,22 +201,45 @@ namespace DeskSeasons
                 var b = Balls[i];
                 float py = b.Y;
                 b.VY += g * dt; b.X += b.VX * dt; b.Y += b.VY * dt;
+                b.Age += dt;
                 float speed = (float)Math.Sqrt(b.VX * b.VX + b.VY * b.VY);
                 bool done = false;
+
+                // снежок, брошенный «в экран», долетел до точки прицела
+                if (b.Splat && b.Age >= b.Flight) { AddSplat(b.X, b.Y, b.R); Balls.RemoveAt(i); continue; }
+
+                // попадание в Йети (своими снежками он в себя не попадает)
+                if (b.Owner != 1 && Walker != null && Sea == Season.Winter && b.Age > 0.05f)
+                {
+                    float wy = SurfaceGround(Walker.M, Walker.X) - 42 * K;
+                    float dx = Walker.X - b.X, dy = wy - b.Y, rs = 30 * K + b.R;
+                    if (dx * dx + dy * dy < rs * rs)
+                    {
+                        Burst(b.X, b.Y, b.R * 0.7f);
+                        HitWalker(Walker, b);
+                        Balls.RemoveAt(i); continue;
+                    }
+                }
 
                 // попадание в снеговика
                 foreach (var sm in Snowmen)
                 {
+                    if (sm == b.From) continue;
                     List<float> rr; var cs = BallCenters(sm, out rr);
                     for (int j = 0; j < cs.Count && !done; j++)
                     {
                         float dx = cs[j].X - b.X, dy = cs[j].Y - b.Y, rs = rr[j] + b.R;
                         if (dx * dx + dy * dy > rs * rs) continue;
-                        if (b.FromYeti || speed > 420 * K)
+                        if (b.Owner == 1 || (b.Owner == 0 && speed > 420 * K))
                         { BurstSnowman(sm); Snowmen.Remove(sm); Burst(b.X, b.Y, b.R); }
-                        else if (j == cs.Count - 1 && !sm.Complete && b.VY > 0)
+                        else if (b.Owner == 0 && j == cs.Count - 1 && !sm.Complete && b.VY > 0)
                         { AddBall(sm, b.R); }
-                        else Burst(b.X, b.Y, b.R);
+                        else
+                        {
+                            Burst(b.X, b.Y, b.R);
+                            // лёгкое попадание игрока — снеговик обижается и отвечает в курсор
+                            if (b.Owner == 0 && sm.Complete) { sm.Anger = 2; sm.Cd = 0.5f; }
+                        }
                         done = true;
                     }
                     if (done) break;
@@ -244,7 +267,7 @@ namespace DeskSeasons
                         float surf = SurfaceGround(m, b.X);
                         if (py + b.R <= surf + 2 && b.Y + b.R >= surf)
                         {
-                            if (!b.FromYeti && speed < 650 * K && b.R >= 8 * K) LandBall(m, b);
+                            if (b.Owner == 0 && speed < 650 * K && b.R >= 8 * K) LandBall(m, b);
                             else Burst(b.X, surf - b.R, b.R);
                             done = true;
                         }
@@ -252,6 +275,81 @@ namespace DeskSeasons
                 }
                 if (!done && (b.Y > 20000 || MonAt(b.X, b.Y) == null && b.Y > -5000 && !AnyMonX(b.X))) done = true;
                 if (done) Balls.RemoveAt(i);
+            }
+        }
+
+        // Бросок по параболе: снежок окажется в точке (tx, ty) через время t
+        Ball Throw(float x0, float y0, float tx, float ty, float t, int owner, bool splat, Snowman from)
+        {
+            float g = 1500 * K;
+            var b = new Ball { X = x0, Y = y0, R = 6 * K, Owner = owner, FromYeti = owner == 1, Splat = splat, Flight = t, From = from };
+            b.VX = (tx - x0) / t;
+            b.VY = (ty - y0 - 0.5f * g * t * t) / t;
+            Balls.Add(b);
+            return b;
+        }
+
+        void AddSplat(float x, float y, float r)
+        {
+            if (Splats.Count > 24) Splats.RemoveAt(0);
+            Splats.Add(new Splat { X = x, Y = y, R = Math.Max(r, 6 * K) * 2.8f, Seed = rnd.Next(1000) });
+            for (int i = 0; i < 6; i++) AddSnowPuff(x, y, Rng(-120, 120) * K, -Rng(20, 140) * K);
+        }
+
+        void UpdateSplats(float dt)
+        {
+            for (int i = Splats.Count - 1; i >= 0; i--)
+            {
+                var s = Splats[i];
+                s.Life += dt;
+                s.Drip = Math.Min(s.R * 2.5f, s.Drip + dt * 14 * K);
+                if (s.Life > 3.5f) Splats.RemoveAt(i);
+            }
+        }
+
+        // Йети получил снежком: пошатнулся, рассердился и отвечает
+        void HitWalker(Walker w, Ball b)
+        {
+            w.State = 4; w.T = 0;
+            w.Dir = b.VX > 0 ? -1 : 1;              // поворачивается туда, откуда прилетело
+            if (b.Owner == 2 && b.From != null && Snowmen.Contains(b.From))
+            { w.Target = b.From; w.Thrown.Remove(b.From); w.Anger = Math.Max(w.Anger, 1); }
+            else w.Anger = 3;
+            w.ThrowCd = 0.9f;
+        }
+
+        // Снеговики кидаются в Йети, а иногда и в курсор
+        void UpdateSnowmen(float dt)
+        {
+            if (!Fights) return;
+            foreach (var sm in Snowmen)
+            {
+                if (!sm.Complete) continue;
+                sm.ThrowT -= dt;
+                sm.Cd -= dt;
+                if (sm.Cd > 0) continue;
+                List<float> rr; var cs = BallCenters(sm, out rr);
+                var mid = cs[1]; float mr = rr[1];
+                float hx = mid.X + mr * 1.6f, hy = mid.Y - mr * 2f;
+                bool thrown = false;
+                if (Walker != null && Walker.M == sm.M && Math.Abs(Walker.X - sm.X) < 700 * K && Math.Abs(Walker.X - sm.X) > 60 * K && R01() < 0.6f)
+                {
+                    Throw(hx, hy, Walker.X, SurfaceGround(Walker.M, Walker.X) - 45 * K, 0.75f, 2, false, sm);
+                    thrown = true;
+                }
+                else if (sm.M.B.Contains((int)CursorX, (int)CursorY))
+                {
+                    float dx = CursorX - sm.X, dy = CursorY - cs[2].Y;
+                    bool near = dx * dx + dy * dy < 450 * K * 450 * K;
+                    if (sm.Anger > 0 || (near && R01() < 0.3f))
+                    {
+                        Throw(hx, hy, CursorX, CursorY, 0.8f, 2, true, sm);
+                        if (sm.Anger > 0) sm.Anger--;
+                        thrown = true;
+                    }
+                }
+                if (thrown) sm.ThrowT = 0.35f;
+                sm.Cd = sm.Anger > 0 ? 1.1f : Rng(3, 7);
             }
         }
 
@@ -344,13 +442,33 @@ namespace DeskSeasons
             if (!Mons.Contains(m)) { Walker = null; return; }
             if (w.State == 0)
             {
+                // курсор рядом — персонаж останавливается, Йети машет рукой
+                float cy = SurfaceGround(m, w.X) - 40 * K;
+                float hdx = CursorX - w.X, hdy = CursorY - cy;
+                w.Wave = hdx * hdx + hdy * hdy < 75 * K * 75 * K;
+
+                if (Sea == Season.Winter && Fights && w.Anger > 0)
+                {
+                    // перестрелка: стоит на месте и отвечает, пока не «остынет»
+                    w.ThrowCd -= dt;
+                    if (w.ThrowCd <= 0)
+                    {
+                        bool atSnowman = w.Target != null && Snowmen.Contains(w.Target);
+                        w.AimCursor = !atSnowman;
+                        w.State = 2; w.T = 0; w.Throws = 0;
+                        w.Anger--; w.ThrowCd = 1.3f;
+                    }
+                    return;
+                }
+                if (w.Wave) return;
+
                 bool hop = Sea == Season.Spring;
                 float sp = WalkSpeed;
                 if (hop) { float ph = (w.Anim % 1f); sp *= ph < 0.6f ? 1.4f : 0.05f; }
                 w.X += w.Dir * sp * dt;
                 w.Anim += dt * (hop ? 1.6f : 2.2f);
 
-                if (Sea == Season.Winter) YetiThink(w);
+                if (Sea == Season.Winter) YetiThink(w, dt);
                 else if (Sea == Season.Autumn) HedgehogPick(w);
                 else if (R01() < dt * 0.06f && InsideW(w, 100)) { w.State = 1; w.T = 0; }
 
@@ -363,16 +481,32 @@ namespace DeskSeasons
             }
             else if (w.State == 2) // бросок снежка
             {
-                if (w.Throws == 0 && w.T > 0.55f && w.Target != null && Snowmen.Contains(w.Target))
+                bool hasTarget = w.Target != null && Snowmen.Contains(w.Target);
+                // разворачивается к цели ещё во время замаха
+                float aimX = w.AimCursor ? CursorX : hasTarget ? w.Target.X : w.X + w.Dir;
+                if (w.T < 0.5f && Math.Abs(aimX - w.X) > 5) w.Dir = aimX > w.X ? 1 : -1;
+                if (w.Throws == 0 && w.T > 0.55f)
                 {
-                    List<float> rr; var cs = BallCenters(w.Target, out rr);
-                    var c = cs[cs.Count - 1];
-                    float x0 = w.X + w.Dir * 14 * K, y0 = SurfaceGround(m, w.X) - 70 * K;
-                    float tt = 0.75f, g = 1500 * K;
-                    Balls.Add(new Ball { X = x0, Y = y0, R = 6 * K, FromYeti = true, VX = (c.X - x0) / tt, VY = (c.Y - y0 - 0.5f * g * tt * tt) / tt });
+                    float x0 = w.X + w.Dir * 14 * K, y0 = SurfaceGround(m, w.X) - 95 * K;
+                    if (w.AimCursor)
+                        Throw(x0, y0, CursorX, CursorY, 0.8f, 1, true, null);
+                    else if (hasTarget)
+                    {
+                        List<float> rr; var cs = BallCenters(w.Target, out rr);
+                        var c = cs[cs.Count - 1];
+                        Throw(x0, y0, c.X, c.Y, 0.75f, 1, false, null);
+                    }
                     w.Throws = 1;
                 }
-                if (w.T > 1.4f) { w.State = 0; w.T = 0; w.Throws = 0; w.Target = null; }
+                if (w.T > 1.2f)
+                {
+                    w.State = 0; w.T = 0; w.Throws = 0; w.AimCursor = false;
+                    if (w.Anger <= 0) w.Target = null;
+                }
+            }
+            else if (w.State == 4) // получил снежком — пошатывается
+            {
+                if (w.T > 0.75f) { w.State = 0; w.T = 0; }
             }
             else if (w.State == 3) // лепит снеговика
             {
@@ -395,8 +529,15 @@ namespace DeskSeasons
             return w.X > w.M.W.Left + margin * K && w.X < w.M.W.Right - margin * K;
         }
 
-        void YetiThink(Walker w)
+        void YetiThink(Walker w, float dt)
         {
+            // иногда сам начинает кидаться в курсор, если тот неподалёку
+            if (Fights && w.CursorThrows < 3 && w.M.B.Contains((int)CursorX, (int)CursorY) &&
+                Math.Abs(CursorX - w.X) < 520 * K && Math.Abs(CursorX - w.X) > 60 * K && R01() < dt * 0.3f)
+            {
+                w.State = 2; w.T = 0; w.Throws = 0; w.AimCursor = true; w.CursorThrows++;
+                return;
+            }
             foreach (var sm in Snowmen)
             {
                 if (sm.M != w.M || sm == w.Own || w.Thrown.Contains(sm) || sm.Balls.Count == 0) continue;

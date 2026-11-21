@@ -40,7 +40,7 @@ namespace DeskSeasons
         public List<int> Segs = new List<int>(); // пары x0,x1 видимых участков верхней кромки
         public ItemLayer Layer = new ItemLayer();
         public bool Decor, Seen;
-        public float VX;
+        public float VX, VY;
     }
 
     class Mon
@@ -60,15 +60,28 @@ namespace DeskSeasons
         public Mon M; public float X;
         public List<float> Balls = new List<float>();
         public int Hat; public int Scarf;
+        public float Cd = 3, ThrowT;   // перезарядка и анимация броска
+        public int Anger;              // сколько раз ещё ответит в курсор после попадания
         public bool Complete { get { return Balls.Count >= 3; } }
     }
 
-    class Ball { public float X, Y, VX, VY, R; public bool FromYeti; public Mon M; }
+    // Owner: 0 — игрок, 1 — Йети, 2 — снеговик. Splat — летит «в экран» и оставляет кляксу в точке прицела.
+    class Ball
+    {
+        public float X, Y, VX, VY, R, Age, Flight;
+        public bool FromYeti, Splat;
+        public int Owner;
+        public Snowman From;
+    }
+
+    // Клякса от снежка на «стекле» экрана: сползает и тает
+    class Splat { public float X, Y, R, Life, Drip; public int Seed; }
 
     class Walker
     {
         public Mon M; public float X, Y; public int Dir; public int State; public float T, Anim;
         public Snowman Target, Own; public bool Built; public int Throws, Carry;
+        public bool AimCursor, Wave; public int Anger, CursorThrows; public float ThrowCd;
         public List<Snowman> Thrown = new List<Snowman>();
     }
 
@@ -95,6 +108,7 @@ namespace DeskSeasons
         public List<Particle> P = new List<Particle>();
         public List<Snowman> Snowmen = new List<Snowman>();
         public List<Ball> Balls = new List<Ball>();
+        public List<Splat> Splats = new List<Splat>();
         public Ball Held;
         public Walker Walker;
         public Cleaner Cleaner;
@@ -134,7 +148,7 @@ namespace DeskSeasons
         public void SetSeason(Season s)
         {
             Sea = s; SS = S.Seasons[(int)s];
-            P.Clear(); Piles.Clear(); Z.Clear(); Snowmen.Clear(); Balls.Clear(); Held = null;
+            P.Clear(); Piles.Clear(); Z.Clear(); Snowmen.Clear(); Balls.Clear(); Splats.Clear(); Held = null;
             Walker = null; Cleaner = null; Flies.Clear(); Bolt = null;
             foreach (var m in Mons) { Array.Clear(m.Gh, 0, m.Gh.Length); m.Items.Clear(); }
             ScheduleWalker(true);
@@ -158,6 +172,7 @@ namespace DeskSeasons
         bool AccumSeason { get { return Sea != Season.Summer; } }
         bool SnowSeason { get { return Sea == Season.Winter; } }
         public bool CanSnowball { get { return Sea == Season.Winter && SS.Extra; } }
+        public bool Fights { get { return Sea == Season.Winter && SS.Fights; } }
         float PileMax { get { return SS.PileMax * K * (Sea == Season.Winter ? 1f : 0.7f); } }
         float GroundMax { get { return SS.PileMax * K * (Sea == Season.Winter ? 2.3f : 1.4f); } }
         float Wind
@@ -191,6 +206,8 @@ namespace DeskSeasons
             if (AccumSeason) RelaxAll();
             if (AccumSeason && (S.BrushOnHover || modifier)) BrushAt(CursorX, CursorY, modifier);
             UpdateBalls(dt);
+            UpdateSnowmen(dt);
+            UpdateSplats(dt);
             UpdateWalker(dt);
             UpdateCleaner(dt);
             UpdateFlies(dt);
@@ -223,11 +240,16 @@ namespace DeskSeasons
                 p.Decor = !(w.Excluded && S.ExcludeNoDecor);
                 Z.Add(p);
 
-                int dx = p.R.X - p.Prev.X, dy = p.R.Y - p.Prev.Y;
-                p.VX = dx / dt;
-                float speed = (float)Math.Sqrt(dx * dx + dy * dy) / dt;
+                // Снег держится, пока окно ведут плавно. Слетает от рывка — резкого изменения скорости:
+                // старт с места, резкая остановка, тряска туда-сюда. Чем сильнее рывок, тем больше слетает.
+                float vx = (p.R.X - p.Prev.X) / dt, vy = (p.R.Y - p.Prev.Y) / dt;
+                float dvx = vx - p.VX, dvy = vy - p.VY;
+                float jerk = (float)Math.Sqrt(dvx * dvx + dvy * dvy);
                 if (p.R.Width != p.Prev.Width) Resize(p);
-                if (speed > 2600 * K || (!p.Decor && (HasStuff(p)))) DropPile(p, dx / dt, 200);
+                if (!p.Decor && HasStuff(p)) DropPile(p, 0, 200);
+                else if (jerk > 1300 * K && HasStuff(p))
+                    ShakeOff(p, Math.Min(1f, 0.3f + (jerk - 1300 * K) / (2500 * K)), p.VX, p.VY);
+                p.VX = vx; p.VY = vy;
             }
             // исчезнувшие окна (закрыты/свернуты) — их снег падает вниз
             var gone = new List<IntPtr>();
@@ -319,6 +341,56 @@ namespace DeskSeasons
             p.Items.Clear();
         }
 
+        // Стряхивание после рывка. Снег берётся там, где он лежал в прошлом кадре (p.Prev и прошлые видимые участки),
+        // и сохраняет прежнюю скорость окна — инерция: окно уехало, а снег остался и ссыпается комьями.
+        void ShakeOff(Pile p, float frac, float vx, float vy)
+        {
+            if (p.Segs.Count == 0) { Array.Clear(p.Hh, 0, p.Hh.Length); p.Items.Clear(); return; }
+            var r = p.Prev;
+            int made = 0;
+            if (SnowSeason)
+                for (int c = 0; c < p.Hh.Length; c++)
+                {
+                    float h = p.Hh[c];
+                    if (h < 0.5f) continue;
+                    float take = Math.Min(h, h * frac * Rng(0.75f, 1.25f));
+                    p.Hh[c] -= take;
+                    float x = r.Left + c * CW;
+                    if (!InSegs(p, x)) continue;   // видимые участки ещё прошлого кадра — в тех же координатах
+                    // крупный ком примерно на каждые 3 px снятого снега + немного пыли
+                    if (made < 260 && R01() < take / (2.2f * K))
+                    {
+                        made++;
+                        var q = NewParticle(PK.Snow, x + Rng(-2, 2), r.Top - R01() * h);
+                        if (q != null)
+                        {
+                            q.Size = Rng(2.6f, 5.6f) * K;
+                            q.Shape = 1;                            // ком: падает с ускорением, а не парит как снежинка
+                            q.TVY = Rng(500, 700) * K;
+                            q.VX = vx * Rng(0.7f, 1f) + Rng(-25, 25) * K;
+                            q.VY = vy * 0.8f - Rng(0, 70) * K;
+                        }
+                    }
+                    if (made < 260 && R01() < take / (5f * K))
+                    {
+                        made++;
+                        AddSnowPuff(x, r.Top - R01() * h, vx * 0.5f + Rng(-50, 50) * K, -Rng(20, 110) * K);
+                    }
+                }
+            else
+            {
+                for (int c = 0; c < p.Hh.Length; c++) p.Hh[c] *= 1 - frac;
+                for (int i = p.Items.Count - 1; i >= 0; i--)
+                {
+                    if (R01() > frac) continue;
+                    var it = p.Items[i];
+                    p.Items.RemoveAt(i);
+                    if (made++ < 200 && InSegs(p, r.Left + it.X))
+                        ItemToParticle(it, r.Left + it.X, r.Top - it.Y, vx * 0.8f, vy * 0.8f - Rng(20, 90) * K);
+                }
+            }
+        }
+
         void ItemToParticle(Item it, float x, float y, float vx, float vy)
         {
             var q = NewParticle(it.Kind, x, y);
@@ -345,9 +417,9 @@ namespace DeskSeasons
             {
                 if (m.Hidden) continue;
                 float widthK = m.B.Width / 1000f;
-                spawnAcc += main * f * widthK * dt;
+                if (main > 0) spawnAcc += main * f * widthK * dt * SideFactor(m, mk, wind);
                 while (spawnAcc >= 1) { spawnAcc -= 1; SpawnTop(m, mk, wind); }
-                float rr = rain * f * widthK * dt;
+                float rr = rain > 0 ? rain * f * widthK * dt * SideFactor(m, PK.Rain, wind) : 0;
                 while (rr >= 1 || (rr > 0 && R01() < rr)) { rr -= 1; SpawnTop(m, PK.Rain, wind); }
             }
             // дерево роняет лепестки / листья
@@ -368,12 +440,42 @@ namespace DeskSeasons
             }
         }
 
+        // Средняя скорость падения и сноса частицы данного вида — для расчёта, откуда она должна прийти
+        void Flow(byte kind, float wind, out float vy, out float vx)
+        {
+            float vf = SS.Speed / 100f;
+            switch (kind)
+            {
+                case PK.Rain: vy = 985 * vf * K; vx = wind * 2.2f; break;
+                case PK.Leaf: vy = 62 * vf * K; vx = wind; break;
+                case PK.Petal: vy = 43 * vf * K; vx = wind; break;
+                case PK.Fluff: vy = 12 * K; vx = wind * 1.4f; break;
+                default: vy = 40 * vf * K * (SS.Weather == 2 ? 1.6f : 1f); vx = wind; break;
+            }
+        }
+
+        // Во сколько раз больше частиц нужно монитору, чтобы с ветром часть их пришла сбоку
+        float SideFactor(Mon m, byte kind, float wind)
+        {
+            float vy, vx; Flow(kind, wind, out vy, out vx);
+            return 1 + m.B.Height * Math.Abs(vx) / (m.B.Width * vy);
+        }
+
+        // Частица появляется над монитором или — при ветре — у его наветренного края.
+        // Поток через верх ~ ширина × скорость падения, через бок ~ высота × скорость ветра.
+        // Сбоку частица появляется, только если там нет соседнего монитора: сосед и так её «надует».
         void SpawnTop(Mon m, byte kind, float wind)
         {
-            float fallSpeed = kind == PK.Rain ? 900 : 50;
-            float drift = wind / (fallSpeed * K) * m.B.Height; // смещение за время падения
-            float x = m.B.Left + R01() * (m.B.Width + Math.Abs(drift)) - Math.Max(0, drift);
-            NewParticle(kind, x, m.B.Top - 12 * K);
+            float vy, vx; Flow(kind, wind, out vy, out vx);
+            float top = m.B.Width * vy, side = m.B.Height * Math.Abs(vx);
+            if (side > 1 && R01() < side / (top + side))
+            {
+                float y = m.B.Top + R01() * m.B.Height;
+                float x = vx > 0 ? m.B.Left - 10 * K : m.B.Right + 10 * K;
+                if (MonAt(x, y) == null) NewParticle(kind, x, y);
+                return;
+            }
+            NewParticle(kind, m.B.Left + R01() * m.B.Width, m.B.Top - 12 * K);
         }
 
         Particle NewParticle(byte kind, float x, float y)
@@ -466,9 +568,18 @@ namespace DeskSeasons
                 }
                 else
                 {
-                    float a = Math.Min(1f, dt * (q.Kind == PK.Rain ? 8f : 2.2f));
-                    q.VY += (q.TVY - q.VY) * a;
-                    q.VX += (targetVX - q.VX) * a;
+                    if (q.Kind == PK.Snow && q.Shape == 1)
+                    {
+                        // снежный ком: обычная сила тяжести, горизонтальная скорость гаснет медленно
+                        q.VY = Math.Min(q.TVY, q.VY + g * dt);
+                        q.VX += (targetVX - q.VX) * Math.Min(1f, dt * 0.8f);
+                    }
+                    else
+                    {
+                        float a = Math.Min(1f, dt * (q.Kind == PK.Rain ? 8f : 2.2f));
+                        q.VY += (q.TVY - q.VY) * a;
+                        q.VX += (targetVX - q.VX) * a;
+                    }
                 }
                 q.X += q.VX * dt; q.Y += q.VY * dt;
 
@@ -482,8 +593,9 @@ namespace DeskSeasons
         bool TryLand(Particle q, float prevY)
         {
             bool accum = AccumSeason && q.Kind != PK.Rain && q.Kind != PK.Fluff;
-            // окна, сверху вниз по Z
-            for (int i = 0; i < Z.Count; i++)
+            // окна, сверху вниз по Z (стряхнутый ком первые полсекунды летит мимо окон — иначе снова ляжет на то же окно)
+            bool freshClump = q.Kind == PK.Snow && q.Shape == 1 && q.Life < 0.5f;
+            for (int i = 0; i < Z.Count && !freshClump; i++)
             {
                 var p = Z[i];
                 if (!p.Decor || p.Segs.Count == 0) continue;

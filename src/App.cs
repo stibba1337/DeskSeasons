@@ -320,6 +320,7 @@ namespace DeskSeasons
             menu.Items.Add(Item("Позвать: " + Settings.CharacterNames[si], delegate { W.SummonWalker(); }));
             if (si != 2) menu.Items.Add(Item("Вызвать: " + Settings.CleanerNames[si], delegate { W.SummonCleaner(null); }));
             if (si == 0) menu.Items.Add(Item("Слепить снеговика", delegate { W.BuildSnowman(); }));
+            if (si == 0) menu.Items.Add(Check("Йети и снеговики кидаются снежками", ss.Fights, delegate { ss.Fights = !ss.Fights; Changed(); }));
             menu.Items.Add(Item("Стряхнуть всё с окон и экрана", delegate { W.ClearAll(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add(Item("Настройки…", ShowSettings));

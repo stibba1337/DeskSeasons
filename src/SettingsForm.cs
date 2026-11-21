@@ -207,7 +207,12 @@ namespace DeskSeasons
             Header(t, "Персонаж: " + Settings.CharacterNames[si]);
             Check(t, Settings.CharacterNames[si] + " иногда гуляет по низу экрана", () => ss().Character, v => ss().Character = v);
             Combo(t, "Как часто", new[] { "Редко", "Иногда", "Часто" }, () => ss().CharacterFreq, v => ss().CharacterFreq = v);
-            if (si == 0) Note(t, "Йети кидает снежки в снеговиков и лепит своих.");
+            if (si == 0)
+            {
+                Check(t, "Йети и снеговики кидаются снежками (друг в друга и в курсор)", () => ss().Fights, v => ss().Fights = v);
+                Note(t, "Йети лепит своих снеговиков и кидает снежки в чужих. Попадите в него своим снежком — он рассердится и ответит. " +
+                        "Снеговик, в которого попали легонько, тоже ответит, а сильным броском его можно разбить. Наведите курсор — помашут рукой.");
+            }
             if (si == 3) Note(t, "Ёжик собирает опавшие листья на спину.");
 
             var row = new FlowLayoutPanel { AutoSize = true, Margin = new Padding(0, 10, 0, 0) };
