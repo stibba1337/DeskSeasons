@@ -76,6 +76,29 @@ namespace DeskSeasons
             }
         }
 
+        // Отладка: раскадровка всех анимаций Йети (--yeti): по строке на анимацию, 6 кадров во времени
+        public void DrawYetiStrip(Graphics g, float zoom)
+        {
+            var fake = new Mon { B = new Rectangle(0, 0, 4000, 4000), W = new Rectangle(0, 0, 4000, 4000), Primary = true };
+            fake.Gh = new float[1100];
+            Sea = Season.Winter; SS = S.Seasons[0];
+            for (int row = 0; row < 5; row++)
+                for (int f = 0; f < 6; f++)
+                {
+                    var w = new Walker { M = fake, Dir = 1 };
+                    switch (row)
+                    {
+                        case 0: w.State = 0; w.Anim = f * 0.13f; break;                    // ходьба
+                        case 1: w.State = 2; w.T = f * 0.2f; break;                         // бросок
+                        case 2: w.State = 3; w.T = f * 0.25f; break;                        // лепит
+                        case 3: w.State = 4; w.T = f * 0.13f; w.Anger = 2; break;          // попали
+                        case 4: w.State = 0; w.Wave = true; T = f * 0.1f; break;           // машет
+                    }
+                    if (row == 3 && f == 5) { w.State = 0; w.Anger = 2; }                  // сердится после
+                    Place(g, zoom, 60 + f * 120, 125 + row * 130, delegate { DrawYeti(g, w); });
+                }
+        }
+
         delegate void Act();
 
         static void Place(Graphics g, float zoom, float x, float y, Act draw)

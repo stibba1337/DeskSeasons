@@ -17,16 +17,16 @@ namespace DeskSeasons
         static void Main(string[] args)
         {
             if (args.Length == 2 && args[0] == "--export-icon") { Art.ExportIco(args[1]); return; }
-            if (args.Length == 2 && args[0] == "--sheet")
+            if (args.Length == 2 && (args[0] == "--sheet" || args[0] == "--yeti"))
             {
                 Art.Init(1f);
                 var w = new World(new Settings());
-                using (var bmp = new System.Drawing.Bitmap(1700, 1400))
+                using (var bmp = new System.Drawing.Bitmap(args[0] == "--yeti" ? 1460 : 1700, args[0] == "--yeti" ? 1320 : 1400))
                 using (var g = System.Drawing.Graphics.FromImage(bmp))
                 {
                     g.Clear(System.Drawing.Color.FromArgb(255, 30, 36, 52));
                     g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                    w.DrawSheet(g, 2f);
+                    if (args[0] == "--yeti") w.DrawYetiStrip(g, 2f); else w.DrawSheet(g, 2f);
                     bmp.Save(args[1]);
                 }
                 return;

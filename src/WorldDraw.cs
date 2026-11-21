@@ -662,37 +662,53 @@ namespace DeskSeasons
             g.Restore(st);
         }
 
-        // Йети: смотрит вправо, ступни в (0,0), рост ~100. Порядок: дальняя рука → ноги → туловище с мехом →
-        // лицо → ближняя рука поверх. У всего лёгкий голубой контур, чтобы Йети был виден и на белых окнах.
+        // Йети: смотрит вправо, ступни в (0,0), рост ~100. Порядок: ноги → туловище с мехом →
+        // лицо → обе руки поверх. У всего лёгкий голубой контур, чтобы Йети был виден и на белых окнах.
         void DrawYeti(Graphics g, Walker w)
         {
-            float a = w.State == 0 && !w.Wave ? (float)Math.Sin(w.Anim * 4) : 0;
-            float by = -Math.Abs(a) * 2.5f;                       // покачивание при ходьбе
+            bool walking = w.State == 0 && !w.Wave && w.Anger <= 0;
+            float a = walking ? (float)Math.Sin(w.Anim * 4) : 0;
+            float by = -Math.Abs(a) * 3f;                          // подпрыгивает на каждом шаге
+            if (w.State == 3) by += 5 + (float)Math.Abs(Math.Sin(w.T * 10)) * 2;   // присел и лепит
             Color furTop = Color.FromArgb(255, 250, 252, 255), furBot = Color.FromArgb(255, 214, 225, 242);
             Color line = Color.FromArgb(255, 150, 170, 200);
 
-            // угол ближней руки (0 — висит вниз, минус — вперёд/вверх, плюс — назад)
-            float arm;
-            if (w.State == 2) arm = w.T < 0.55f ? 175 - w.T * 30 : -75;           // замах назад-вверх → бросок вперёд
-            else if (w.State == 3) arm = -45 + (float)Math.Sin(w.T * 9) * 25;      // лепит перед собой
-            else if (w.State == 4) arm = 60;                                       // отшатнулся
-            else if (w.Wave) arm = -155 + (float)Math.Sin(T * 11) * 22;            // машет
-            else arm = a * 22;
-            float backArm = w.State == 4 ? -50 : -a * 22;
+            // Углы рук от направления «вниз». Правая рука: минус — наружу/вверх. Левая (зеркально): плюс — наружу/вверх.
+            float rArm, lArm;
+            if (w.State == 2)
+            {
+                // замах: рука идёт наружу и вверх над плечом (не через лицо), левая отводится для равновесия
+                if (w.T < 0.55f) { float k = w.T / 0.55f; k = k * (2 - k); rArm = -8 - k * 162; lArm = 8 + k * 45; }
+                else if (w.T < 0.75f) { float k = (w.T - 0.55f) / 0.2f; rArm = -170 + k * 90; lArm = 53 - k * 50; } // резкий бросок вперёд
+                else { float k = Math.Min(1, (w.T - 0.75f) / 0.45f); rArm = -80 + k * 70; lArm = 3 + k * 7; }       // рука опускается
+            }
+            else if (w.State == 3)
+            {
+                float s = (float)Math.Sin(w.T * 10);
+                rArm = 28 + s * 14; lArm = -28 + s * 14;                                  // обе руки перед собой — лепит
+            }
+            else if (w.State == 4)
+            {
+                float s = (float)Math.Sin(w.T * 30) * 15;
+                rArm = -135 + s; lArm = 135 - s;                                         // взмахнул обеими руками
+            }
+            else if (w.Wave) { rArm = -155 + (float)Math.Sin(T * 11) * 22; lArm = 12; }  // машет, вторая на боку
+            else if (w.Anger > 0) { rArm = -22 + (float)Math.Sin(T * 6) * 4; lArm = 22 - (float)Math.Sin(T * 6) * 4; } // кулаки в стороны
+            else { rArm = -10 + a * 24; lArm = 10 + a * 24; }                            // ходьба: руки качаются
 
             using (var pen = new Pen(line, 1.6f))
             using (var furB = new SolidBrush(furTop))
             using (var shadeB = new SolidBrush(furBot))
             using (var padB = new SolidBrush(Color.FromArgb(255, 120, 140, 175)))
             {
-                // дальняя рука
-                Limb(g, -21, -50 + by, backArm, 12, 30, shadeB, pen, padB);
-                // ноги
+                // ноги: на шаге одна поднимается, другая стоит
                 for (int s = -1; s <= 1; s += 2)
                 {
-                    float lx = s * 9 + (s < 0 ? a : -a) * 6;
-                    g.FillEllipse(shadeB, lx - 8, -20, 16, 20); g.DrawEllipse(pen, lx - 8, -20, 16, 20);
-                    g.FillEllipse(padB, lx - 6, -5, 13, 5);
+                    float lift = walking ? Math.Max(0, s * a) * 7 : 0;
+                    float lx = s * 9;
+                    if (w.State == 3) lx = s * 12;                                       // присел — ноги шире
+                    g.FillEllipse(shadeB, lx - 8, -20 - lift, 16, 20); g.DrawEllipse(pen, lx - 8, -20 - lift, 16, 20);
+                    g.FillEllipse(padB, lx - 6, -5 - lift, 13, 5);
                 }
                 // туловище: контур из «пушистых» кругов, затем заливка с градиентом
                 var tufts = new List<RectangleF>();
@@ -740,11 +756,12 @@ namespace DeskSeasons
                     else
                         using (var p2 = new Pen(dark.Color, 1.5f)) g.DrawArc(p2, fx - 5, fy + 1, 10, 7, 20, 140);
                 }
-                // ближняя рука поверх туловища
-                Limb(g, 22, -50 + by, arm, 13, 31, furB, pen, padB);
+                // обе руки поверх туловища
+                Limb(g, -22, -50 + by, lArm, 13, 30, furB, pen, padB);
+                Limb(g, 22, -50 + by, rArm, 13, 31, furB, pen, padB);
                 if (w.State == 2 && w.T < 0.55f)
                 {
-                    double ar = arm * Math.PI / 180;
+                    double ar = rArm * Math.PI / 180;
                     float tx = 22 - (float)Math.Sin(ar) * 31, ty = -50 + by + (float)Math.Cos(ar) * 31;
                     Art.Ball(g, tx, ty, 6);
                 }
